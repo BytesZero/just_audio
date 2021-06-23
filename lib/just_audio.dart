@@ -1528,6 +1528,28 @@ abstract class AudioSource {
 
   @override
   bool operator ==(dynamic other) => other is AudioSource && other._id == _id;
+
+  // Mapping from extensions to content types for the web player. If an
+  // extension is missing, please submit a pull request.
+  var mimeTypes = {
+    '.aac': 'audio/aac',
+    '.mp3': 'audio/mpeg',
+    '.ogg': 'audio/ogg',
+    '.opus': 'audio/opus',
+    '.wav': 'audio/wav',
+    '.weba': 'audio/webm',
+    '.mp4': 'audio/mp4',
+    '.m4a': 'audio/mp4',
+    '.aif': 'audio/x-aiff',
+    '.aifc': 'audio/x-aiff',
+    '.aiff': 'audio/x-aiff',
+    '.m3u': 'audio/x-mpegurl',
+  };
+
+  // Default to 'audio/mpeg'
+  String getMimeType(String path) {
+    return mimeTypes[p.extension(path).toLowerCase()] ?? 'audio/mpeg';
+  }
 }
 
 /// An [AudioSource] that can appear in a sequence.
@@ -1573,25 +1595,7 @@ abstract class UriAudioSource extends IndexedAudioSource {
 
   Future<Uri> _loadAsset(String assetPath) async {
     if (kIsWeb) {
-      // Mapping from extensions to content types for the web player. If an
-      // extension is missing, please submit a pull request.
-      const mimeTypes = {
-        '.aac': 'audio/aac',
-        '.mp3': 'audio/mpeg',
-        '.ogg': 'audio/ogg',
-        '.opus': 'audio/opus',
-        '.wav': 'audio/wav',
-        '.weba': 'audio/webm',
-        '.mp4': 'audio/mp4',
-        '.m4a': 'audio/mp4',
-        '.aif': 'audio/x-aiff',
-        '.aifc': 'audio/x-aiff',
-        '.aiff': 'audio/x-aiff',
-        '.m3u': 'audio/x-mpegurl',
-      };
-      // Default to 'audio/mpeg'
-      final mimeType =
-          mimeTypes[p.extension(assetPath).toLowerCase()] ?? 'audio/mpeg';
+      final mimeType = getMimeType(assetPath);
       return _encodeDataUrl(
           base64
               .encode((await rootBundle.load(assetPath)).buffer.asUint8List()),
@@ -2076,21 +2080,6 @@ class LockCachingAudioSource extends StreamAudioSource {
   Future<File> get _partialCacheFile async =>
       File('${(await _cacheFile).path}.part');
 
-  /// We use this to record the original content type of the downloaded audio.
-  /// NOTE: We could instead rely on the cache file extension, but the original
-  /// URL might not provide a correct extension. As a fallback, we could map the
-  /// MIME type to an extension but we will need a complete dictionary.
-  Future<File> get _mimeFile async => File('${(await _cacheFile).path}.mime');
-
-  Future<String> _readCachedMimeType() async {
-    final file = await _mimeFile;
-    if (file.existsSync()) {
-      return (await _mimeFile).readAsString();
-    } else {
-      return 'audio/mpeg';
-    }
-  }
-
   /// Start downloading the whole audio file to the cache and fulfill byte-range
   /// requests during the download. There are 3 scenarios:
   ///
@@ -2105,7 +2094,6 @@ class LockCachingAudioSource extends StreamAudioSource {
   Future<HttpClientResponse> _fetch() async {
     final cacheFile = await _cacheFile;
     final partialCacheFile = await _partialCacheFile;
-    final mimeType = await _readCachedMimeType();
 
     File getEffectiveCacheFile() =>
         partialCacheFile.existsSync() ? partialCacheFile : cacheFile;
@@ -2126,6 +2114,10 @@ class LockCachingAudioSource extends StreamAudioSource {
     // ignore: close_sinks
     final sink = (await _partialCacheFile).openWrite();
     var sourceLength = response.contentLength;
+    // Parse mimeType
+    var mimeType =
+        response.headers?.contentType?.mimeType ?? getMimeType(uri.path);
+    print('mimeType:$mimeType');
     final inProgressResponses = <_InProgressCacheResponse>[];
     StreamSubscription subscription;
     //int percentProgress = 0;
@@ -2235,7 +2227,7 @@ class LockCachingAudioSource extends StreamAudioSource {
         sourceLength: sourceLength,
         contentLength: end - start,
         offset: start,
-        contentType: await _readCachedMimeType(),
+        contentType: getMimeType(uri.path),
         stream: cacheFile.openRead(start, end),
       );
     }
