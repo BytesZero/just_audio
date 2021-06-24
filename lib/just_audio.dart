@@ -1648,6 +1648,62 @@ class ProgressiveAudioSource extends UriAudioSource {
       id: _id, uri: _effectiveUri.toString(), headers: headers);
 }
 
+/// 缓存音频内容
+class CacheAudioSource extends UriAudioSource {
+  CacheAudioSource(Uri uri, {Map headers, dynamic tag, Duration duration})
+      : super(uri, headers: headers, tag: tag, duration: duration);
+
+  @override
+  Future<void> _setup(AudioPlayer player) async {
+    await super._setup(player);
+    _overrideUri = await _loadFile();
+  }
+
+  Future<Uri> _loadFile() async {
+    if (kIsWeb) {
+      return uri;
+    } else {
+      // 获取文件地址
+      final file = await _getCacheFileByUri();
+      // print('Cache file:${file?.path}');
+      // 不存在下载文件
+      if (!file.existsSync()) {
+        file.createSync(recursive: true);
+        bool downloadFinish = false;
+        HttpClient client;
+        try {
+          client = HttpClient();
+          var request = await client.getUrl(uri);
+          var response = await request.close();
+          if (response.statusCode == 200) {
+            var bytes = await consolidateHttpClientResponseBytes(response);
+            await file.writeAsBytes(bytes);
+          }
+          downloadFinish = true;
+        } catch (e) {
+          // 下载失败，删除，返回原有 url
+          file.delete();
+          return uri;
+        } finally {
+          client?.close();
+        }
+      }
+      return Uri.file(file.path);
+    }
+  }
+
+  /// Get file for caching asset media with proper extension
+  Future<File> _getCacheFileByUri() async => File(p.joinAll([
+        (await _getCacheDir()).path,
+        'files',
+        ...uri.pathSegments,
+      ]));
+
+  @override
+  AudioSourceMessage _toMessage() => DashAudioSourceMessage(
+      id: _id, uri: _effectiveUri.toString(), headers: headers);
+}
+
 /// An [AudioSource] representing a DASH stream. The following URI schemes are
 /// supported:
 ///
